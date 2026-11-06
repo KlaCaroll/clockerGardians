@@ -1,0 +1,19 @@
+.venv/
+venv/
+
+# Caches Python
+__pycache__/
+*.py[cod]
+
+# Compilation & Packaging
+build/
+dist/
+*.spec
+
+# Données locales et rapports générés
+rapport/
+*.tmp
+config.json
+
+# Fichiers macOS
+.DS_Store
