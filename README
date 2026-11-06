@@ -118,6 +118,17 @@ STORAGE & CONFIGURATION
 
 
 --------------------------------------------------------------------------------
+ROADMAP & FUTURE STORAGE
+--------------------------------------------------------------------------------
+
+Clocker currently favors zero-dependency, human-readable plain text reports
+that require no external database viewer. An internal SQLite storage backend
+will likely be integrated in future releases based on community demand to
+enable granular analytics and complex querying while preserving plain text
+exports.
+
+
+--------------------------------------------------------------------------------
 LICENSE
 --------------------------------------------------------------------------------
 
