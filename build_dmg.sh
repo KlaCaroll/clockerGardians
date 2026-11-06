@@ -3,7 +3,7 @@ set -e
 
 APP_NAME="Clocker"
 DMG_NAME="Clocker-macOS.dmg"
-ENTRY_POINT="clock_app.py"
+ENTRY_POINT="app.py"
 
 echo "=================================================="
 echo "      BUILDING & PACKAGING ${APP_NAME}"
@@ -28,6 +28,7 @@ pyinstaller --name "${APP_NAME}" \
             --clean \
             --hidden-import Foundation \
             --hidden-import AppKit \
+            --hidden-import engine \
             "${ENTRY_POINT}"
 
 # 4. Create DMG output directory
