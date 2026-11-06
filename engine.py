@@ -1,21 +1,6 @@
 import os
 import json
-import subprocess
 from datetime import datetime
-import objc
-
-from Foundation import (
-    NSObject,
-    NSDistributedNotificationCenter,
-    NSWorkspace
-)
-from AppKit import (
-    NSApplication,
-    NSOpenPanel,
-    NSModalResponseOK
-)
-import Quartz
-
 
 # Global tracking state
 active_session_start = None
@@ -46,27 +31,6 @@ def save_custom_report_directory(chosen_path):
         log_debug(f"Report directory updated to: {clean_path}")
     except Exception as e:
         log_debug(f"Configuration save error: {e}")
-
-
-def choose_report_directory_dialog():
-    app = NSApplication.sharedApplication()
-    app.activateIgnoringOtherApps_(True)
-    panel = NSOpenPanel.openPanel()
-    panel.setTitle_("Choose Reports Folder")
-    panel.setMessage_("Select the destination folder for Clocker reports:")
-    panel.setCanChooseFiles_(False)
-    panel.setCanChooseDirectories_(True)
-    panel.setAllowsMultipleSelection_(False)
-    panel.setCanCreateDirectories_(True)
-    panel.setPrompt_("Select")
-
-    if panel.runModal() == NSModalResponseOK:
-        urls = panel.URLs()
-        if urls and len(urls) > 0:
-            selected_path = str(urls[0].path())
-            save_custom_report_directory(selected_path)
-            return selected_path
-    return None
 
 
 def get_report_directory():
@@ -102,6 +66,13 @@ def format_duration(seconds):
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
     return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+
+
+def format_display_duration(seconds):
+    total_seconds = max(0, int(seconds))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    return f"{hours:02d}h {minutes:02d}m"
 
 
 def read_history(filepath):
@@ -156,6 +127,13 @@ def calculate_totals(sessions, now):
         week_total += elapsed
 
     return day_total, week_total
+
+
+def get_current_totals():
+    now = datetime.now()
+    filepath = get_log_filepath(now)
+    sessions = read_history(filepath)
+    return calculate_totals(sessions, now)
 
 
 def rewrite_report_file(filepath, sessions, now):
@@ -241,68 +219,3 @@ def save_current_state():
     start_session()
     log_debug(f"Manual sync completed to: {filepath}")
     return filepath
-
-
-class SystemEventsObserver(NSObject):
-    def screenLocked_(self, notification):
-        global active_lock_start
-        active_lock_start = datetime.now()
-        stop_session("Screen locked")
-
-    def screenUnlocked_(self, notification):
-        global active_lock_start
-        start_session()
-        active_lock_start = None
-
-    def sleepNotification_(self, notification):
-        stop_session("System sleep")
-
-    def wakeNotification_(self, notification):
-        start_session()
-
-
-def setup_observers():
-    observer = SystemEventsObserver.alloc().init()
-    dist_center = NSDistributedNotificationCenter.defaultCenter()
-    ws_center = NSWorkspace.sharedWorkspace().notificationCenter()
-
-    dist_center.addObserver_selector_name_object_(
-        observer,
-        "screenLocked:",
-        "com.apple.screenIsLocked",
-        None
-    )
-    dist_center.addObserver_selector_name_object_(
-        observer,
-        "screenUnlocked:",
-        "com.apple.screenIsUnlocked",
-        None
-    )
-
-    ws_center.addObserver_selector_name_object_(
-        observer,
-        "sleepNotification:",
-        "NSWorkspaceWillSleepNotification",
-        None
-    )
-    ws_center.addObserver_selector_name_object_(
-        observer,
-        "wakeNotification:",
-        "NSWorkspaceDidWakeNotification",
-        None
-    )
-
-    ws_center.addObserver_selector_name_object_(
-        observer,
-        "sleepNotification:",
-        "NSWorkspaceScreensDidSleepNotification",
-        None
-    )
-    ws_center.addObserver_selector_name_object_(
-        observer,
-        "wakeNotification:",
-        "NSWorkspaceScreensDidWakeNotification",
-        None
-    )
-
-    return observer, dist_center, ws_center
