@@ -1,74 +1,40 @@
-import time
 import os
-import re
 import json
-import atexit
-import signal
+import subprocess
 from datetime import datetime
-from itertools import groupby
+import objc
 
 from Foundation import (
     NSObject,
     NSDistributedNotificationCenter,
-    NSRunLoop,
-    NSDate,
-    NSDefaultRunLoopMode
+    NSWorkspace
 )
 from AppKit import (
-    NSWorkspace,
-    NSWorkspaceWillSleepNotification,
-    NSWorkspaceDidWakeNotification,
-    NSWorkspaceScreensDidSleepNotification,
-    NSWorkspaceScreensDidWakeNotification,
-    NSOpenPanel,
     NSApplication,
+    NSOpenPanel,
     NSModalResponseOK
 )
-
-# CONFIGURATION
-MIN_SESSION_SECONDS = 5
-TICKER_INTERVAL = 5
-
-active_start = None
-active_start_datetime = None
-session_active = False
-loop_count = 0
+import Quartz
 
 
-# LOGS
+# Global tracking state
+active_session_start = None
+active_lock_start = None
+
+
 def log_debug(message):
-    now = datetime.now().strftime("%H:%M:%S")
-    print(f"[{now}] 🔍 {message}", flush=True)
+    current_time = datetime.now().strftime("%H:%M:%S")
+    print(f"[{current_time}] 🔍 {message}")
 
 
-# FORMATAGE DES DURÉES
-def format_duration(seconds):
-    total_seconds = max(0, int(round(seconds)))
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    secs = total_seconds % 60
-    return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
-
-
-# GESTION DES DOSSIERS ET CONFIGURATION
-def get_config_filepath():
+def get_config_directory():
     app_support = os.path.expanduser("~/Library/Application Support/Clocker")
     os.makedirs(app_support, exist_ok=True)
-    return os.path.join(app_support, "config.json")
+    return app_support
 
 
-def load_custom_report_directory():
-    config_file = get_config_filepath()
-    if os.path.exists(config_file):
-        try:
-            with open(config_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                custom_dir = data.get("report_directory")
-                if custom_dir and os.path.isdir(custom_dir):
-                    return custom_dir
-        except Exception:
-            pass
-    return None
+def get_config_filepath():
+    return os.path.join(get_config_directory(), "config.json")
 
 
 def save_custom_report_directory(chosen_path):
@@ -115,288 +81,228 @@ def get_report_directory():
         except Exception as e:
             log_debug(f"Error reading configuration: {e}")
 
-    # Fallback to default user Documents folder if not configured
     if not target_dir or not os.path.exists(target_dir):
         target_dir = os.path.expanduser("~/Documents")
 
-    # Enforce a dedicated reports subfolder to avoid clutter
     reports_folder = os.path.join(target_dir, "Clocker_Reports")
     os.makedirs(reports_folder, exist_ok=True)
     return reports_folder
 
-def get_log_filepath(reference_datetime=None):
-    if reference_datetime is None:
-        reference_datetime = datetime.now()
 
-    iso_year, iso_week, _ = reference_datetime.isocalendar()
-    filename = f"rapport_temps_semaine_{iso_week:02d}_{iso_year}.txt"
-    return os.path.join(get_report_directory(), filename)
+def get_log_filepath(date_obj):
+    reports_dir = get_report_directory()
+    cal = date_obj.isocalendar()
+    filename = f"rapport_temps_semaine_{cal[1]}_{cal[0]}.txt"
+    return os.path.join(reports_dir, filename)
 
 
-# LECTURE ET CALCULS
+def format_duration(seconds):
+    total_seconds = max(0, int(seconds))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
+
+
 def read_history(filepath):
     sessions = []
     if not os.path.exists(filepath):
         return sessions
 
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            for line in f:
-                if "SESSION" not in line:
-                    continue
-                try:
-                    date_match = re.search(
-                        r"(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}):(\d{2}):(\d{2})|\s+(\d{1,2})h(\d{2}))?",
-                        line
-                    )
-                    if not date_match:
-                        continue
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line.startswith("[") or " -> " not in line:
+                continue
 
-                    date_str = date_match.group(1)
-                    hour_sec = date_match.group(2)
-                    min_sec = date_match.group(3)
-                    sec = date_match.group(4)
-                    hour_min = date_match.group(5)
-                    min_leg = date_match.group(6)
+            try:
+                parts = line.split(" -> ")
+                start_part = parts[0].strip("[ ]")
+                end_part = parts[1].split(" | ")[0].strip()
 
-                    if hour_sec is not None:
-                        session_datetime = datetime.strptime(
-                            f"{date_str} {hour_sec.zfill(2)}:{min_sec}:{sec}",
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                    elif hour_min is not None:
-                        session_datetime = datetime.strptime(
-                            f"{date_str} {hour_min.zfill(2)}h{min_leg}",
-                            "%Y-%m-%d %Hh%M"
-                        )
-                    else:
-                        session_datetime = datetime.strptime(date_str, "%Y-%m-%d")
+                start_dt = datetime.strptime(start_part, "%Y-%m-%d %H:%M:%S")
+                end_dt = datetime.strptime(end_part, "%Y-%m-%d %H:%M:%S")
+                duration_minutes = (end_dt - start_dt).total_seconds() / 60.0
 
-                    minutes_match = re.search(
-                        r"SESSION\s*\|?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:min|minutes)\b",
-                        line,
-                        re.IGNORECASE
-                    )
-                    if not minutes_match:
-                        continue
-
-                    minutes = float(minutes_match.group(1))
-                    if minutes >= 0:
-                        sessions.append({"datetime": session_datetime, "minutes": minutes})
-                except (ValueError, IndexError):
-                    continue
-    except Exception as e:
-        log_debug(f"History reading error: {e}")
+                sessions.append({
+                    "start": start_dt,
+                    "end": end_dt,
+                    "duration": duration_minutes
+                })
+            except Exception:
+                continue
 
     return sessions
 
 
-def calculate_totals(sessions, reference_datetime):
-    target_date = reference_datetime.date()
-    iso_year, iso_week, _ = reference_datetime.isocalendar()
-
+def calculate_totals(sessions, now):
     day_total = 0.0
     week_total = 0.0
+    current_cal = now.isocalendar()
 
-    for session in sessions:
-        session_datetime = session["datetime"]
-        session_date = session_datetime.date()
-        session_iso_year, session_iso_week, _ = session_datetime.isocalendar()
+    for s in sessions:
+        s_start = s["start"]
+        s_cal = s_start.isocalendar()
 
-        if session_date == target_date:
-            day_total += session["minutes"]
+        if s_cal[0] == current_cal[0] and s_cal[1] == current_cal[1]:
+            week_total += s["duration"]
+            if s_start.date() == now.date():
+                day_total += s["duration"]
 
-        if session_iso_year == iso_year and session_iso_week == iso_week:
-            week_total += session["minutes"]
+    global active_session_start
+    if active_session_start is not None:
+        elapsed = (now - active_session_start).total_seconds() / 60.0
+        day_total += elapsed
+        week_total += elapsed
 
     return day_total, week_total
 
 
-# ÉCRITURE DU RAPPORT
-def update_log(session_duration, start_datetime, end_time):
-    temp_filepath = None
-    try:
-        if session_duration <= 0:
-            return
+def rewrite_report_file(filepath, sessions, now):
+    header = (
+        "================================================================================\n"
+        "                                CLOCKER REPORT                                 \n"
+        "================================================================================\n\n"
+    )
 
-        session_minutes = round(session_duration / 60, 6)
-        session_human = format_duration(session_duration)
-        filepath = get_log_filepath(start_datetime)
+    day_total, week_total = calculate_totals(sessions, now)
 
-        log_debug(
-            f"Saving session: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')} "
-            f"to {end_time.strftime('%H:%M:%S')} | {session_human}"
-        )
+    summary = (
+        f"Generated at: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Today's Total:     {format_duration(day_total * 60)}\n"
+        f"This Week's Total: {format_duration(week_total * 60)}\n\n"
+        "--------------------------------------------------------------------------------\n"
+        "SESSION DETAILS\n"
+        "--------------------------------------------------------------------------------\n"
+    )
 
-        sessions = read_history(filepath)
-        sessions.append({"datetime": start_datetime, "minutes": session_minutes})
+    note = (
+        "NOTE:\n"
+        "Because the tracker relies on screen unlock status, short breaks away from the desk\n"
+        "(such as grabbing water, using the restroom, or walking across the office) are not deducted\n"
+        "unless the screen is locked.\n"
+        "Similarly, standard statutory breaks (e.g., 15-minute breaks) are not automatically factored in.\n"
+        "As a result, this total may slightly underestimate or differ from your actual billable work hours.\n"
+    )
 
-        day_total, week_total = calculate_totals(sessions, start_datetime)
-        day_human = format_duration(day_total * 60)
-        week_human = format_duration(week_total * 60)
+    nb = (
+        "N.B. (Nota Bene):\n"
+        "For the most accurate records, remember to lock your screen (Cmd + Ctrl + Q) whenever you step away.\n"
+    )
 
-        iso_year, iso_week, _ = start_datetime.isocalendar()
-        weekly_sessions = [
-            s for s in sessions
-            if s["datetime"].isocalendar()[0] == iso_year
-            and s["datetime"].isocalendar()[1] == iso_week
-        ]
-        weekly_sessions.sort(key=lambda s: s["datetime"], reverse=True)
+    disclaimer = f"\n--------------------------------------------------------------------------------\n{note}\n{nb}"
 
-        disclaimer = (
-            "NOTE :\n"
-            "Le compteur se basant sur l'ecran deverouille, toute coupure pour aller chercher de l'eau,\n"
-            "aller au toilettes ou se deplacer dans l'open space n'est pas comptabilise.\n"
-            "Il en va de meme pour les 15min de pause autorisees par la loi.\n"
-            "Ce compteur total sous-estime donc le vrai total des heures de travail.\n"
-        )
+    body_lines = []
+    for s in sessions:
+        dur_str = format_duration(s["duration"] * 60)
+        start_str = s["start"].strftime("%Y-%m-%d %H:%M:%S")
+        end_str = s["end"].strftime("%Y-%m-%d %H:%M:%S")
+        body_lines.append(f"[{start_str}] -> [{end_str}] | Active: {dur_str}")
 
-        temp_filepath = filepath + ".tmp"
-        with open(temp_filepath, "w", encoding="utf-8") as f:
-            f.write("=" * 50 + "\n")
-            f.write(f" TIME REPORT AT : {end_time.strftime('%d/%m/%Y at %H:%M:%S')}\n")
-            f.write(f" ISO WEEK : {iso_week:02d} / {iso_year}\n")
-            f.write(f" TOTAL TODAY : {day_human}\n")
-            f.write(f" TOTAL WEEK : {week_human}\n")
-            f.write("=" * 50 + "\n\n")
+    content = header + summary + "\n".join(body_lines) + "\n" + disclaimer + "\n"
 
-            f.write(disclaimer + "\n")
-            f.write("DETAILS :\n")
-
-            for day_date, group in groupby(weekly_sessions, key=lambda s: s["datetime"].date()):
-                day_sessions = list(group)
-                day_subtotal = sum(s["minutes"] for s in day_sessions)
-                day_subtotal_human = format_duration(day_subtotal * 60)
-
-                f.write(f"\n--- {day_date.strftime('%Y-%m-%d')} (Total: {day_subtotal_human}) ---\n")
-
-                for s in day_sessions:
-                    s_start = s["datetime"]
-                    mins = s["minutes"]
-                    dur = format_duration(mins * 60)
-                    f.write(
-                        f"  {s_start.strftime('%Y-%m-%d %H:%M:%S')} "
-                        f"| DURATION : {dur} | SESSION {mins:.6f} min\n"
-                    )
-
-        os.replace(temp_filepath, filepath)
-        log_debug("Report saved successfully.")
-    except Exception as e:
-        log_debug(f"Writing error: {e}")
-        if temp_filepath and os.path.exists(temp_filepath):
-            try:
-                os.remove(temp_filepath)
-            except OSError:
-                pass
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
 
 
-# CYCLE DE VIE DE SESSION
 def start_session():
-    global active_start, active_start_datetime, session_active
-    if session_active:
-        return
-    active_start = time.monotonic()
-    active_start_datetime = datetime.now()
-    session_active = True
-    log_debug(f"SESSION STARTED: {active_start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    global active_session_start, active_lock_start
+    if active_session_start is None:
+        active_session_start = datetime.now()
+        active_lock_start = None
+        log_debug(f"SESSION STARTED: {active_session_start.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
-def stop_session(reason="Stop"):
-    global active_start, active_start_datetime, session_active
-    if not session_active or active_start is None:
+def stop_session(reason=""):
+    global active_session_start
+    if active_session_start is None:
         return
 
-    end_time = datetime.now()
-    duration = time.monotonic() - active_start
-    log_debug(f"{reason} | Duration: {format_duration(duration)}")
-
-    if duration >= MIN_SESSION_SECONDS:
-        update_log(duration, active_start_datetime, end_time)
-
-    active_start = None
-    active_start_datetime = None
-    session_active = False
-
-
-# NOTIFICATIONS SYSTÈME MACOS
-class ActivityMonitor(NSObject):
-    def screenLocked_(self, n):
-        log_debug("NOTIFICATION: SCREEN LOCK")
-        stop_session("Screen locked")
-
-    def screenUnlocked_(self, n):
-        log_debug("NOTIFICATION: SCREEN UNLOCK")
-        start_session()
-
-    def systemWillSleep_(self, n):
-        log_debug("NOTIFICATION: SYSTEM SLEEP")
-        stop_session("System sleep")
-
-    def systemDidWake_(self, n):
-        log_debug("NOTIFICATION: SYSTEM WAKE")
-        start_session()
-
-    def screensDidSleep_(self, n):
-        log_debug("NOTIFICATION: DISPLAY SLEEP")
-        stop_session("Display sleep")
-
-    def screensDidWake_(self, n):
-        log_debug("NOTIFICATION: DISPLAY WAKE")
-        start_session()
-
-
-def setup_observers():
-    monitor = ActivityMonitor.alloc().init()
-    dist = NSDistributedNotificationCenter.defaultCenter()
-    dist.addObserver_selector_name_object_(monitor, "screenLocked:", "com.apple.screenIsLocked", None)
-    dist.addObserver_selector_name_object_(monitor, "screenUnlocked:", "com.apple.screenIsUnlocked", None)
-
-    ws = NSWorkspace.sharedWorkspace().notificationCenter()
-    ws.addObserver_selector_name_object_(monitor, "systemWillSleep:", NSWorkspaceWillSleepNotification, None)
-    ws.addObserver_selector_name_object_(monitor, "systemDidWake:", NSWorkspaceDidWakeNotification, None)
-    ws.addObserver_selector_name_object_(monitor, "screensDidSleep:", NSWorkspaceScreensDidSleepNotification, None)
-    ws.addObserver_selector_name_object_(monitor, "screensDidWake:", NSWorkspaceScreensDidWakeNotification, None)
-    return monitor, dist, ws
-
-
-def handle_exit_signal(signum, frame):
-    stop_session("Terminal closed or signal received")
-    raise SystemExit(0)
-
-signal.signal(signal.SIGHUP, handle_exit_signal)
-signal.signal(signal.SIGTERM, handle_exit_signal)
-atexit.register(stop_session, reason="Script termination")
-
-
-def main():
-    global loop_count
-    print("CLOCKED - MONITORING ACTIF")
-    monitor, dist, ws = setup_observers()
-    start_session()
-
-    try:
-        while True:
-            NSRunLoop.currentRunLoop().runMode_beforeDate_(
-                NSDefaultRunLoopMode,
-                NSDate.dateWithTimeIntervalSinceNow_(1.0)
-            )
-            loop_count += 1
-    except KeyboardInterrupt:
-        print()
-        stop_session("Arrêt manuel (CTRL+C)")
-    finally:
-        dist.removeObserver_(monitor)
-        ws.removeObserver_(monitor)
-
-if __name__ == "__main__":
-    main()
-
-def save_current_state():
-    """Flush and update active session to report file on demand."""
     now = datetime.now()
     filepath = get_log_filepath(now)
-    # Stop session with standard reason, then immediately restart
+    duration_min = (now - active_session_start).total_seconds() / 60.0
+
+    sessions = read_history(filepath)
+    sessions.append({
+        "start": active_session_start,
+        "end": now,
+        "duration": duration_min
+    })
+
+    rewrite_report_file(filepath, sessions, now)
+    log_debug(f"SESSION STOPPED: {reason} ({format_duration(duration_min * 60)})")
+    active_session_start = None
+
+
+def save_current_state():
+    now = datetime.now()
+    filepath = get_log_filepath(now)
     stop_session("Manual sync requested")
     start_session()
     log_debug(f"Manual sync completed to: {filepath}")
     return filepath
+
+
+class SystemEventsObserver(NSObject):
+    def screenLocked_(self, notification):
+        global active_lock_start
+        active_lock_start = datetime.now()
+        stop_session("Screen locked")
+
+    def screenUnlocked_(self, notification):
+        global active_lock_start
+        start_session()
+        active_lock_start = None
+
+    def sleepNotification_(self, notification):
+        stop_session("System sleep")
+
+    def wakeNotification_(self, notification):
+        start_session()
+
+
+def setup_observers():
+    observer = SystemEventsObserver.alloc().init()
+    dist_center = NSDistributedNotificationCenter.defaultCenter()
+    ws_center = NSWorkspace.sharedWorkspace().notificationCenter()
+
+    dist_center.addObserver_selector_name_object_(
+        observer,
+        "screenLocked:",
+        "com.apple.screenIsLocked",
+        None
+    )
+    dist_center.addObserver_selector_name_object_(
+        observer,
+        "screenUnlocked:",
+        "com.apple.screenIsUnlocked",
+        None
+    )
+
+    ws_center.addObserver_selector_name_object_(
+        observer,
+        "sleepNotification:",
+        "NSWorkspaceWillSleepNotification",
+        None
+    )
+    ws_center.addObserver_selector_name_object_(
+        observer,
+        "wakeNotification:",
+        "NSWorkspaceDidWakeNotification",
+        None
+    )
+
+    ws_center.addObserver_selector_name_object_(
+        observer,
+        "sleepNotification:",
+        "NSWorkspaceScreensDidSleepNotification",
+        None
+    )
+    ws_center.addObserver_selector_name_object_(
+        observer,
+        "wakeNotification:",
+        "NSWorkspaceScreensDidWakeNotification",
+        None
+    )
+
+    return observer, dist_center, ws_center
