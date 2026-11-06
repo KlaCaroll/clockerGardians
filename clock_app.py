@@ -16,6 +16,7 @@ from AppKit import (
 from clocker import (
     start_session,
     stop_session,
+    save_current_state,
     get_log_filepath,
     read_history,
     calculate_totals,
@@ -32,7 +33,7 @@ class ClockerMenuApp(NSObject):
         if self is None:
             return None
 
-        # 1. Créer le Status Item natif dans la barre de menus
+        # Status Bar item
         self.status_bar = NSStatusBar.systemStatusBar()
         self.status_item = self.status_bar.statusItemWithLength_(NSVariableStatusItemLength)
         
@@ -40,7 +41,7 @@ class ClockerMenuApp(NSObject):
         if self.button:
             self.button.setTitle_("⏱️ 00h 00m")
 
-        # 2. Construire le menu natif
+        # Native Dropdown Menu
         self.menu = NSMenu.alloc().init()
 
         self.today_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
@@ -49,6 +50,11 @@ class ClockerMenuApp(NSObject):
         self.week_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "This week: 00h 00m", None, ""
         )
+
+        sync_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Save / Sync Now", "syncNow:", "s"
+        )
+        sync_item.setTarget_(self)
 
         open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
             "Open Reports Folder", "openReports:", ""
@@ -65,9 +71,11 @@ class ClockerMenuApp(NSObject):
         )
         quit_item.setTarget_(self)
 
+        # Assemble menu
         self.menu.addItem_(self.today_item)
         self.menu.addItem_(self.week_item)
         self.menu.addItem_(NSMenuItem.separatorItem())
+        self.menu.addItem_(sync_item)
         self.menu.addItem_(open_item)
         self.menu.addItem_(change_item)
         self.menu.addItem_(NSMenuItem.separatorItem())
@@ -75,11 +83,11 @@ class ClockerMenuApp(NSObject):
 
         self.status_item.setMenu_(self.menu)
 
-        # 3. Initialiser les observateurs système de veille / réveil
+        # System observers
         self.monitor, self.dist_center, self.ws_center = setup_observers()
         start_session()
 
-        # 4. Timer périodique de mise à jour (toutes les 5 secondes)
+        # Refresh timer (every 5 seconds)
         self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
             5.0, self, "updateTicker:", None, True
         )
@@ -109,6 +117,11 @@ class ClockerMenuApp(NSObject):
         self.refresh_display()
 
     @objc.IBAction
+    def syncNow_(self, sender):
+        save_current_state()
+        self.refresh_display()
+
+    @objc.IBAction
     def openReports_(self, sender):
         folder = get_report_directory()
         subprocess.run(["open", folder])
@@ -126,9 +139,7 @@ class ClockerMenuApp(NSObject):
 
 def main():
     app = NSApplication.sharedApplication()
-    # Mode agent : pas d'icône dans le Dock, barre des menus uniquement
     app.setActivationPolicy_(1)
-    
     delegate = ClockerMenuApp.alloc().init()
     app.setDelegate_(delegate)
     app.run()

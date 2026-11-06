@@ -74,25 +74,29 @@ def load_custom_report_directory():
 def save_custom_report_directory(chosen_path):
     config_file = get_config_filepath()
     try:
+        clean_path = str(chosen_path).strip()
         with open(config_file, "w", encoding="utf-8") as f:
-            json.dump({"report_directory": chosen_path}, f, indent=2)
+            json.dump({"report_directory": clean_path}, f, indent=2)
+        log_debug(f"Report directory updated to: {clean_path}")
     except Exception as e:
         log_debug(f"Configuration save error: {e}")
 
 
 def choose_report_directory_dialog():
-    NSApplication.sharedApplication()
+    app = NSApplication.sharedApplication()
+    app.activateIgnoringOtherApps_(True)
     panel = NSOpenPanel.openPanel()
-    panel.setTitle_("Choisir l'emplacement des rapports Clocker")
-    panel.setMessage_("Sélectionnez le dossier où enregistrer vos rapports :")
+    panel.setTitle_("Choose Reports Folder")
+    panel.setMessage_("Select the destination folder for Clocker reports:")
     panel.setCanChooseFiles_(False)
     panel.setCanChooseDirectories_(True)
     panel.setAllowsMultipleSelection_(False)
     panel.setCanCreateDirectories_(True)
+    panel.setPrompt_("Select")
 
     if panel.runModal() == NSModalResponseOK:
         urls = panel.URLs()
-        if urls:
+        if urls and len(urls) > 0:
             selected_path = str(urls[0].path())
             save_custom_report_directory(selected_path)
             return selected_path
@@ -100,15 +104,25 @@ def choose_report_directory_dialog():
 
 
 def get_report_directory():
-    custom_dir = load_custom_report_directory()
-    if custom_dir:
-        os.makedirs(custom_dir, exist_ok=True)
-        return custom_dir
+    config_file = get_config_filepath()
+    target_dir = None
 
-    default_dir = os.path.expanduser("~/Documents/Clocker/rapport")
-    os.makedirs(default_dir, exist_ok=True)
-    return default_dir
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                target_dir = data.get("report_directory")
+        except Exception as e:
+            log_debug(f"Error reading configuration: {e}")
 
+    # Fallback to default user Documents folder if not configured
+    if not target_dir or not os.path.exists(target_dir):
+        target_dir = os.path.expanduser("~/Documents")
+
+    # Enforce a dedicated reports subfolder to avoid clutter
+    reports_folder = os.path.join(target_dir, "Clocker_Reports")
+    os.makedirs(reports_folder, exist_ok=True)
+    return reports_folder
 
 def get_log_filepath(reference_datetime=None):
     if reference_datetime is None:
@@ -376,3 +390,13 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def save_current_state():
+    """Flush and update active session to report file on demand."""
+    now = datetime.now()
+    filepath = get_log_filepath(now)
+    # Stop session with standard reason, then immediately restart
+    stop_session("Manual sync requested")
+    start_session()
+    log_debug(f"Manual sync completed to: {filepath}")
+    return filepath
