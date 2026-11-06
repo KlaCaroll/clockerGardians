@@ -58,7 +58,7 @@ def get_report_directory():
     return reports_folder
 
 
-def get_log_filepath(date_obj):
+def get_report_filepath(date_obj):
     reports_dir = get_report_directory()
     cal = date_obj.isocalendar()
     filename = f"rapport_temps_semaine_{cal[1]}_{cal[0]}.txt"
@@ -136,7 +136,7 @@ def calculate_totals(sessions, now):
 
 def get_current_totals():
     now = datetime.now()
-    filepath = get_log_filepath(now)
+    filepath = get_report_filepath(now)
     sessions = read_history(filepath)
     return calculate_totals(sessions, now)
 
@@ -202,7 +202,7 @@ def stop_session(reason=""):
         return
 
     now = datetime.now()
-    filepath = get_log_filepath(now)
+    filepath = get_report_filepath(now)
     duration_min = (now - active_session_start).total_seconds() / 60.0
 
     sessions = read_history(filepath)
@@ -219,7 +219,7 @@ def stop_session(reason=""):
 
 def save_current_state():
     now = datetime.now()
-    filepath = get_log_filepath(now)
+    filepath = get_report_filepath(now)
     stop_session("Manual sync requested")
     start_session()
     logger.info(f"Manual sync completed to: {filepath}")
