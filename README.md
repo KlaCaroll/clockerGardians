@@ -1,6 +1,4 @@
-================================================================================
-                                ⏱️  CLOCKER
-================================================================================
+⏱️  CLOCKER
 
 A lightweight, autonomous, and privacy-focused menu bar time tracker designed
 natively for macOS.

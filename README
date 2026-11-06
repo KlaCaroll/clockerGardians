@@ -1,0 +1,125 @@
+================================================================================
+                                CLOCKER
+================================================================================
+
+A lightweight, autonomous, and privacy-focused menu bar time tracker designed
+natively for macOS.
+
+Clocker runs discreetly in the macOS menu bar, logging only active work time.
+It automatically pauses tracking whenever your Mac goes to sleep, locks the
+screen, or turns off the display, and resumes seamlessly upon wake or unlock.
+
+
+--------------------------------------------------------------------------------
+FEATURES
+--------------------------------------------------------------------------------
+
+- Zero-Friction Passive Tracking: Automatically detects lock, sleep, and
+  display sleep events via macOS AppKit and Foundation notification centers.
+- Native Menu Bar Interface: Built directly on Cocoa NSStatusBar for immediate,
+  crystal-clear text display without background dock icons.
+- Dedicated Isolated Storage: Organizes weekly structured text reports cleanly
+  inside a dedicated Clocker_Reports subfolder.
+- Custom Location Picker: Change the reports directory on the fly via standard
+  macOS directory chooser dialogs.
+- On-Demand Sync: Instantly flush and persist the running session to disk using
+  the "Save / Sync Now" menu item (or Cmd + S).
+- Autonomous & Standalone: Available as a redistributable, self-contained .dmg
+  installer requiring no terminal setup or Python installation.
+
+
+--------------------------------------------------------------------------------
+INSTALLATION & USAGE
+--------------------------------------------------------------------------------
+
+Option A: Direct Download for Non-Developers (.dmg)
+---------------------------------------------------
+No terminal, Python, or technical knowledge required:
+
+1. Download Clocker-macOS.dmg from the Releases section of this repository.
+2. Double-click the downloaded .dmg file to mount it.
+3. Drag and drop the Clocker icon into the Applications folder shortcut.
+4. Launch Clocker from your Applications folder or Spotlight (Cmd + Space).
+
+IMPORTANT NOTE ON MACOS FIRST LAUNCH (Gatekeeper):
+Because Clocker is an unsigned open-source application, macOS may prevent it
+from opening on the first try.
+To open it: Right-click (or Control-click) Clocker.app in /Applications,
+select "Open", and click "Open" in the confirmation dialog. (Or go to
+System Settings > Privacy & Security and click "Open Anyway").
+This confirmation is only required once.
+
+
+Option B: Run from Source (Developers)
+--------------------------------------
+1. Clone the repository:
+   git clone https://github.com/klacaroll/clockerGardians.git
+   cd clockerGardians
+
+2. Create and activate a virtual environment:
+   python3 -m venv .venv
+   source .venv/bin/activate
+
+3. Install core dependencies:
+   pip install --upgrade pip
+   pip install pyobjc-framework-Cocoa pyobjc-framework-Quartz
+
+4. Run the application:
+   python clock_app.py
+
+
+--------------------------------------------------------------------------------
+MENU CONTROLS
+--------------------------------------------------------------------------------
+
+- Today: XXh XXm
+  Displays cumulative active time tracked today.
+
+- This week: XXh XXm
+  Displays cumulative active time tracked for the current calendar week.
+
+- Save / Sync Now (Shortcut: Cmd + S)
+  Flushes active session time directly into the weekly report file.
+
+- Open Reports Folder
+  Opens the dedicated Clocker_Reports directory in Finder.
+
+- Change Reports Location...
+  Opens a native panel to choose a new destination folder.
+
+- Quit Clocker (Shortcut: Cmd + Q)
+  Closes the app and finalizes the open session.
+
+
+--------------------------------------------------------------------------------
+PACKAGING (.DMG)
+--------------------------------------------------------------------------------
+
+To build the standalone application bundle and disk image locally:
+
+1. Ensure create-dmg is installed:
+   brew install create-dmg
+
+2. Run the automated build script:
+   ./build_dmg.sh
+
+The resulting distribution file will be available under:
+dist/dmg/Clocker-macOS.dmg
+
+
+--------------------------------------------------------------------------------
+STORAGE & CONFIGURATION
+--------------------------------------------------------------------------------
+
+- Configuration: Stored in ~/Library/Application Support/Clocker/config.json
+- Reports: Stored in Clocker_Reports/ located in your chosen directory
+  (defaults to ~/Documents/Clocker_Reports/)
+- File Format: Weekly plain text reports named rapport_temps_semaine_<WEEK>_<YEAR>.txt
+
+
+--------------------------------------------------------------------------------
+LICENSE
+--------------------------------------------------------------------------------
+
+This project is open-source and available under the terms of the MIT License.
+See the LICENSE file for full license text.
