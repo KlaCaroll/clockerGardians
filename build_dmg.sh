@@ -28,7 +28,6 @@ pyinstaller --name "${APP_NAME}" \
             --clean \
             --hidden-import Foundation \
             --hidden-import AppKit \
-            --hidden-import rumps \
             "${ENTRY_POINT}"
 
 # 4. Create DMG output directory

@@ -1,7 +1,17 @@
 import os
 import subprocess
 from datetime import datetime
-import rumps
+import objc
+
+from Foundation import NSObject, NSTimer
+from AppKit import (
+    NSApplication,
+    NSApp,
+    NSStatusBar,
+    NSMenu,
+    NSMenuItem,
+    NSVariableStatusItemLength
+)
 
 from clocker import (
     start_session,
@@ -16,30 +26,68 @@ from clocker import (
 )
 
 
-class ClockerApp(rumps.App):
-    def __init__(self):
-        super(ClockerApp, self).__init__("Clocker", icon=None)
-        
-        self.title = "⏱️ --:--"
-        self.today_item = rumps.MenuItem("Today: 00h 00m")
-        self.week_item = rumps.MenuItem("This week: 00h 00m")
-        
-        self.menu = [
-            self.today_item,
-            self.week_item,
-            None,
-            rumps.MenuItem("Open Reports Folder", callback=self.open_reports),
-            rumps.MenuItem("Change Reports Location...", callback=self.change_folder),
-            None,
-            rumps.MenuItem("Quit Clocker", callback=self.quit_app)
-        ]
+class ClockerMenuApp(NSObject):
+    def init(self):
+        self = objc.super(ClockerMenuApp, self).init()
+        if self is None:
+            return None
 
-        # Register macOS sleep, wake, and lock listeners
+        # 1. Créer le Status Item natif dans la barre de menus
+        self.status_bar = NSStatusBar.systemStatusBar()
+        self.status_item = self.status_bar.statusItemWithLength_(NSVariableStatusItemLength)
+        
+        self.button = self.status_item.button()
+        if self.button:
+            self.button.setTitle_("⏱️ 00h 00m")
+
+        # 2. Construire le menu natif
+        self.menu = NSMenu.alloc().init()
+
+        self.today_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Today: 00h 00m", None, ""
+        )
+        self.week_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "This week: 00h 00m", None, ""
+        )
+
+        open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Open Reports Folder", "openReports:", ""
+        )
+        open_item.setTarget_(self)
+
+        change_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Change Reports Location...", "changeLocation:", ""
+        )
+        change_item.setTarget_(self)
+
+        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            "Quit Clocker", "quitApp:", "q"
+        )
+        quit_item.setTarget_(self)
+
+        self.menu.addItem_(self.today_item)
+        self.menu.addItem_(self.week_item)
+        self.menu.addItem_(NSMenuItem.separatorItem())
+        self.menu.addItem_(open_item)
+        self.menu.addItem_(change_item)
+        self.menu.addItem_(NSMenuItem.separatorItem())
+        self.menu.addItem_(quit_item)
+
+        self.status_item.setMenu_(self.menu)
+
+        # 3. Initialiser les observateurs système de veille / réveil
         self.monitor, self.dist_center, self.ws_center = setup_observers()
         start_session()
 
-    @rumps.timer(5)
-    def update_ticker(self, _):
+        # 4. Timer périodique de mise à jour (toutes les 5 secondes)
+        self.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            5.0, self, "updateTicker:", None, True
+        )
+
+        self.refresh_display()
+        return self
+
+    def refresh_display(self):
         now = datetime.now()
         filepath = get_log_filepath(now)
         sessions = read_history(filepath)
@@ -48,29 +96,43 @@ class ClockerApp(rumps.App):
         day_human = format_duration(day_total * 60)
         week_human = format_duration(week_total * 60)
 
-        # Compact display in the macOS menu bar (e.g., ⏱️ 03h 45m)
         short_day = day_human.rsplit("m", 1)[0] + "m" if "m" in day_human else day_human
-        self.title = f"⏱️ {short_day}"
-        self.today_item.title = f"Today: {day_human}"
-        self.week_item.title = f"This week: {week_human}"
 
-    def open_reports(self, _):
+        if self.button:
+            self.button.setTitle_(f"⏱️ {short_day}")
+
+        self.today_item.setTitle_(f"Today: {day_human}")
+        self.week_item.setTitle_(f"This week: {week_human}")
+
+    @objc.IBAction
+    def updateTicker_(self, timer):
+        self.refresh_display()
+
+    @objc.IBAction
+    def openReports_(self, sender):
         folder = get_report_directory()
         subprocess.run(["open", folder])
 
-    def change_folder(self, _):
-        new_path = choose_report_directory_dialog()
-        if new_path:
-            rumps.notification(
-                title="Clocker",
-                subtitle="Location Updated",
-                message=f"Reports: {os.path.basename(new_path)}"
-            )
+    @objc.IBAction
+    def changeLocation_(self, sender):
+        choose_report_directory_dialog()
+        self.refresh_display()
 
-    def quit_app(self, _):
+    @objc.IBAction
+    def quitApp_(self, sender):
         stop_session("Quit requested from menu bar")
-        rumps.quit_application()
+        NSApp().terminate_(self)
+
+
+def main():
+    app = NSApplication.sharedApplication()
+    # Mode agent : pas d'icône dans le Dock, barre des menus uniquement
+    app.setActivationPolicy_(1)
+    
+    delegate = ClockerMenuApp.alloc().init()
+    app.setDelegate_(delegate)
+    app.run()
 
 
 if __name__ == "__main__":
-    ClockerApp().run()
+    main()
