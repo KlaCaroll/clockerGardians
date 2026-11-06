@@ -1,15 +1,20 @@
 import os
 import json
+import logging
 from datetime import datetime
+
+# Standard logger configuration
+logger = logging.getLogger("clocker")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
 
 # Global tracking state
 active_session_start = None
 active_lock_start = None
-
-
-def log_debug(message):
-    current_time = datetime.now().strftime("%H:%M:%S")
-    print(f"[{current_time}] 🔍 {message}")
 
 
 def get_config_directory():
@@ -28,9 +33,9 @@ def save_custom_report_directory(chosen_path):
         clean_path = str(chosen_path).strip()
         with open(config_file, "w", encoding="utf-8") as f:
             json.dump({"report_directory": clean_path}, f, indent=2)
-        log_debug(f"Report directory updated to: {clean_path}")
+        logger.info(f"Report directory updated to: {clean_path}")
     except Exception as e:
-        log_debug(f"Configuration save error: {e}")
+        logger.error(f"Configuration save error: {e}")
 
 
 def get_report_directory():
@@ -43,7 +48,7 @@ def get_report_directory():
                 data = json.load(f)
                 target_dir = data.get("report_directory")
         except Exception as e:
-            log_debug(f"Error reading configuration: {e}")
+            logger.error(f"Error reading configuration: {e}")
 
     if not target_dir or not os.path.exists(target_dir):
         target_dir = os.path.expanduser("~/Documents")
@@ -146,7 +151,7 @@ def rewrite_report_file(filepath, sessions, now):
     day_total, week_total = calculate_totals(sessions, now)
 
     summary = (
-        f"Generated at: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"Generated at: {now.strftime("%Y-%m-%d %H:%M:%S")}\n"
         f"Today's Total:     {format_duration(day_total * 60)}\n"
         f"This Week's Total: {format_duration(week_total * 60)}\n\n"
         "--------------------------------------------------------------------------------\n"
@@ -188,7 +193,7 @@ def start_session():
     if active_session_start is None:
         active_session_start = datetime.now()
         active_lock_start = None
-        log_debug(f"SESSION STARTED: {active_session_start.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Session started: {active_session_start.strftime("%Y-%m-%d %H:%M:%S")}")
 
 
 def stop_session(reason=""):
@@ -208,7 +213,7 @@ def stop_session(reason=""):
     })
 
     rewrite_report_file(filepath, sessions, now)
-    log_debug(f"SESSION STOPPED: {reason} ({format_duration(duration_min * 60)})")
+    logger.info(f"Session stopped: {reason} ({format_duration(duration_min * 60)})")
     active_session_start = None
 
 
@@ -217,5 +222,5 @@ def save_current_state():
     filepath = get_log_filepath(now)
     stop_session("Manual sync requested")
     start_session()
-    log_debug(f"Manual sync completed to: {filepath}")
+    logger.info(f"Manual sync completed to: {filepath}")
     return filepath
